@@ -1,0 +1,66 @@
+name: Daily Copilot ChangeLog Issue
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Every day at 6:00 AM UTC
+
+jobs:
+  create-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Extract yesterday's Copilot changes
+        id: extract
+        run: |
+          import os
+          from datetime import datetime, timedelta
+
+          changelog_path = 'docs/COPILOT_CHANGELOG.md'
+          today = datetime.utcnow().date()
+          yesterday = today - timedelta(days=1)
+          entries = []
+          entry = []
+          in_entry = False
+          with open(changelog_path) as f:
+              for line in f:
+                  if line.startswith('## ['):
+                      date_str = line[4:14]
+                      try:
+                          entry_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                      except Exception:
+                          entry_date = None
+                      if entry and in_entry:
+                          entries.append(''.join(entry))
+                          entry = []
+                          in_entry = False
+                      if entry_date == yesterday:
+                          entry = [line]
+                          in_entry = True
+                  elif in_entry:
+                      entry.append(line)
+              if entry and in_entry:
+                  entries.append(''.join(entry))
+          if entries:
+              with open('copilot_issue.md', 'w') as out:
+                  out.write(f"# Copilot ChangeLog for {yesterday}\n\n")
+                  for e in entries:
+                      out.write(e + '\n')
+              print(f"::set-output name=found::true")
+          else:
+              print(f"::set-output name=found::false")
+        shell: python
+
+      - name: Create GitHub Issue
+        if: steps.extract.outputs.found == 'true'
+        uses: peter-evans/create-issue-from-file@v4
+        with:
+          title: "Copilot ChangeLog for ${{ github.event.schedule }}"
+          content-filepath: ./copilot_issue.md
+          labels: copilot, changelog, automated

@@ -1,0 +1,57 @@
+name: Copilot ChangeLog Automation
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  update-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Scan commits for Copilot changes and update changelog
+        run: |
+          import os
+          import subprocess
+          from datetime import datetime
+
+          # Get commits in this push/PR
+          commits = subprocess.check_output(['git', 'log', '--pretty=format:%H', 'HEAD~10..HEAD']).decode().splitlines()
+          changelog_path = 'docs/COPILOT_CHANGELOG.md'
+          new_entries = []
+
+          for commit in commits:
+              msg = subprocess.check_output(['git', 'log', '-1', '--pretty=%B', commit]).decode().strip()
+              if '[copilot]' in msg.lower():
+                  date = subprocess.check_output(['git', 'log', '-1', '--pretty=%ad', '--date=short', commit]).decode().strip()
+                  files = subprocess.check_output(['git', 'show', '--pretty=', '--name-only', commit]).decode().strip().replace('\n', ', ')
+                  reason = msg.split('[copilot]', 1)[-1].strip() or 'Copilot-driven change.'
+                  action = subprocess.check_output(['git', 'show', '--stat', commit]).decode().split('\n', 1)[-1].strip()
+                  entry = f"## [{date}]\n- **Context:** {files}\n- **Reason for Change:** {reason}\n- **Action Taken:** {action}\n\n---\n"
+                  new_entries.append(entry)
+
+          if new_entries:
+              with open(changelog_path, 'a') as f:
+                  for entry in new_entries:
+                      f.write(entry)
+              print(f"Appended {len(new_entries)} Copilot entries to changelog.")
+          else:
+              print("No Copilot-tagged commits found.")
+        shell: python
+
+      - name: Commit and push changelog update
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/COPILOT_CHANGELOG.md
+          git commit -m "chore: update Copilot changelog [skip ci]" || echo "No changes to commit."
+          git push
